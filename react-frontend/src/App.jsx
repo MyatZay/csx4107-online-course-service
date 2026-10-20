@@ -1,13 +1,35 @@
-//src/App.jsx
+import { useContext, useEffect, useState } from "react";
+import { UserContext } from "./context/UserContext";
+import "./App.css";
 
-import { HashRouter, Route, Routes } from "react-router-dom";
+const blankCourse = { name: "", durationDays: 30, topics: "", price: 0, maxStudents: 20, status: "Open" };
 
-export default function App() {
-  return (
-    <HashRouter>
-      <Routes>
-        {/** Your Routes go here */}
-      </Routes>
-    </HashRouter>
-  );
+function Login() {
+  const { login } = useContext(UserContext); const [identifier, setIdentifier] = useState("teacher.ada"); const [password, setPassword] = useState("CourseDemo123!"); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const submit = async (event) => { event.preventDefault(); setBusy(true); setError(""); try { await login(identifier, password); } catch (err) { setError(err.message); } finally { setBusy(false); } };
+  return <main className="login-shell"><section className="login-card"><p className="eyebrow">CSX4107 PROJECT</p><h1>Online Course Service</h1><p className="muted">Sign in with a seeded teacher or student account.</p><form onSubmit={submit}><label>Username or email<input value={identifier} onChange={(e) => setIdentifier(e.target.value)} required /></label><label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>{error && <p className="error">{error}</p>}<button disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button></form><p className="hint">Demo password: <code>CourseDemo123!</code></p></section></main>;
 }
+
+function CourseForm({ initial = blankCourse, onSave, onCancel }) {
+  const [form, setForm] = useState({ ...initial, topics: Array.isArray(initial.topics) ? initial.topics.join(", ") : initial.topics }); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const change = (key, value) => setForm((old) => ({ ...old, [key]: value }));
+  const submit = async (event) => { event.preventDefault(); setBusy(true); setError(""); try { await onSave({ ...form, topics: form.topics.split(",").map((topic) => topic.trim()).filter(Boolean) }); } catch (err) { setError(err.message); } finally { setBusy(false); } };
+  return <form className="course-form" onSubmit={submit}><h2>{initial._id ? "Edit course" : "Create course"}</h2><label>Course name<input value={form.name} onChange={(e) => change("name", e.target.value)} required /></label><div className="form-grid"><label>Duration (days)<input type="number" min="1" value={form.durationDays} onChange={(e) => change("durationDays", e.target.value)} required /></label><label>Price<input type="number" min="0" step="0.01" value={form.price} onChange={(e) => change("price", e.target.value)} required /></label><label>Max students<input type="number" min="1" value={form.maxStudents} onChange={(e) => change("maxStudents", e.target.value)} required /></label><label>Status<select value={form.status} onChange={(e) => change("status", e.target.value)}><option>Open</option><option>Close</option><option>Cancel</option></select></label></div><label>Topics (comma-separated)<input value={form.topics} onChange={(e) => change("topics", e.target.value)} required /></label>{error && <p className="error">{error}</p>}<div className="actions"><button disabled={busy}>{busy ? "Saving..." : "Save course"}</button><button type="button" className="secondary" onClick={onCancel}>Cancel</button></div></form>;
+}
+
+function Dashboard() {
+  const { user, logout, request } = useContext(UserContext); const [courses, setCourses] = useState([]); const [search, setSearch] = useState(""); const [view, setView] = useState("catalogue"); const [editing, setEditing] = useState(null); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [detail, setDetail] = useState(null);
+  const loadCourses = async (nextView = view, nextSearch = search) => { setError(""); try { const endpoint = nextView === "mine" && user.role === "student" ? "/api/my-courses" : `/api/course?search=${encodeURIComponent(nextSearch)}`; const data = await request(endpoint); setCourses(data.courses); } catch (err) { setError(err.message); } };
+  // Changing the active view intentionally loads a new API collection.
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { loadCourses(); }, [view]);
+  const selectDetail = async (course) => { try { const data = await request(`/api/course/${course._id}`); setDetail(data.course); } catch (err) { setError(err.message); } };
+  const save = async (course) => { const method = editing?._id ? "PUT" : "POST"; const path = editing?._id ? `/api/course/${editing._id}` : "/api/course"; await request(path, { method, body: JSON.stringify(course) }); setEditing(null); setNotice(`Course ${method === "POST" ? "created" : "updated"}.`); await loadCourses(); };
+  const enrol = async (course) => { try { await request(`/api/course/${course._id}/enroll`, { method: "POST" }); setNotice("Enrolment successful."); await loadCourses(); await selectDetail(course); } catch (err) { setError(err.message); } };
+  const remove = async (course) => { if (!window.confirm(`Delete ${course.name}?`)) return; try { await request(`/api/course/${course._id}`, { method: "DELETE" }); setDetail(null); setNotice("Course deleted."); await loadCourses(); } catch (err) { setError(err.message); } };
+  if (editing) return <Shell user={user} logout={logout}><CourseForm initial={editing === true ? blankCourse : editing} onSave={save} onCancel={() => setEditing(null)} /></Shell>;
+  return <Shell user={user} logout={logout}><div className="toolbar"><div><h1>{user.role === "teacher" ? "My courses" : view === "mine" ? "My enrolled courses" : "Course catalogue"}</h1><p className="muted">{user.role === "teacher" ? "Create and manage only your own courses." : "Find open courses and manage your enrolments."}</p></div>{user.role === "teacher" && <button onClick={() => setEditing(true)}>+ New course</button>}</div>{user.role === "student" && <div className="tabs"><button className={view === "catalogue" ? "active" : "secondary"} onClick={() => setView("catalogue")}>Catalogue</button><button className={view === "mine" ? "active" : "secondary"} onClick={() => setView("mine")}>My courses</button></div>}<form className="search" onSubmit={(e) => { e.preventDefault(); loadCourses("catalogue", search); }}><input aria-label="Search courses" placeholder="Search course or teacher" value={search} onChange={(e) => setSearch(e.target.value)} /><button>Search</button></form>{notice && <p className="notice">{notice}</p>}{error && <p className="error">{error}</p>}<section className="course-grid">{courses.map((course) => <article className="course-card" key={course._id}><span className={`badge ${course.status.toLowerCase()}`}>{course.status}</span><h2>{course.name}</h2><p>{course.topics.join(" · ")}</p><dl><div><dt>Teacher</dt><dd>{course.teacherName}</dd></div><div><dt>Duration</dt><dd>{course.durationDays} days</dd></div><div><dt>Price</dt><dd>${course.price}</dd></div><div><dt>Enrolment</dt><dd>{course.enrolledStudentIds.length}/{course.maxStudents}</dd></div></dl><div className="actions"><button className="secondary" onClick={() => selectDetail(course)}>Details</button>{user.role === "teacher" ? <><button className="secondary" onClick={() => setEditing(course)}>Edit</button><button className="danger" onClick={() => remove(course)}>Delete</button></> : <button disabled={course.status !== "Open" || course.enrolledStudentIds.includes(user.id) || course.enrolledStudentIds.length >= course.maxStudents} onClick={() => enrol(course)}>{course.enrolledStudentIds.includes(user.id) ? "Enrolled" : course.status !== "Open" ? "Closed" : "Enrol"}</button>}</div></article>)}{courses.length === 0 && <p className="empty">No courses found.</p>}</section>{detail && <div className="modal-backdrop" onClick={() => setDetail(null)}><section className="modal" onClick={(e) => e.stopPropagation()}><button className="close" onClick={() => setDetail(null)}>×</button><h2>{detail.name}</h2><p>{detail.topics.join(", ")}</p><p><strong>Status:</strong> {detail.status} · <strong>Seats:</strong> {detail.enrolledStudentIds.length}/{detail.maxStudents}</p>{detail.enrolledStudents && <><h3>Enrolled students</h3><ul>{detail.enrolledStudents.map((student) => <li key={student._id}>{student.username} - {student.email}</li>)}</ul></>}</section></div>}</Shell>;
+}
+
+function Shell({ user, logout, children }) { return <><header><span className="brand">CourseHub</span><span>{user.username} <small>{user.role}</small></span><button className="secondary" onClick={logout}>Sign out</button></header><main className="app-shell">{children}</main></>; }
+export default function App() { const { user, loading } = useContext(UserContext); if (loading) return <main className="login-shell">Loading session...</main>; return user ? <Dashboard /> : <Login />; }
